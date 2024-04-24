@@ -1,0 +1,889 @@
+---
+title: "5205 final project Q2 h2"
+output: html_document
+date: "2023-04-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r message=FALSE, warning=FALSE}
+setwd("C:/Users/Roger/Desktop")
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(grid)
+library(gridExtra)
+library(magrittr)
+library(stringr)
+library(tidytext); library(magrittr)
+disneyland<- read_csv(file = "disneyland.csv")
+```
+
+# Research Question 2    
+
+
+## Hypothesis 1:  
+Ho: Hong Kong Disneyland receives reviews related to shopping experiences in the same proportion as other branches.
+
+Ha: Hong Kong Disneyland receives more reviews related to shopping experiences than other branches.
+```{r}
+# examine branch names
+unique(disneyland$Branch)
+```
+Split dataset based on branch
+```{r}
+hongkong <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong')
+cali <- disneyland %>%
+  filter(Branch == 'Disneyland_California')
+paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris')
+```
+
+Check document integrity
+```{r}
+nrow(disneyland) == nrow(hongkong) + nrow(cali) + nrow(paris)
+```
+
+
+Create corpus based on branches:
+```{r}
+corpus_hk = Corpus(VectorSource(hongkong$Review_Text))
+corpus_cali = Corpus(VectorSource(cali$Review_Text))
+corpus_paris = Corpus(VectorSource(paris$Review_Text))
+```
+
+### Hong Kong
+
+Define shopping-related words:
+```{r}
+shopping_words <- c(
+  'shop',
+  'souvenir',
+  'merchandise',
+  'collectible',
+  'gift',
+  'shirt',
+  'toy',
+  'book',
+  'hat',
+  'band',
+  'art', 'mall', 'cashier', 'cloth', 'checkout', 'cart', 'outlet', 'bag', 'quality', 'boutique'
+)
+```
+
+
+
+Cleaning texts:
+```{r warning=FALSE}
+corpus <- corpus_hk
+# convert to lower cases
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+# remove punctuations
+corpus = tm_map(corpus,FUN = removePunctuation)
+# remove stopwords
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+# stripwhitespaces
+corpus = tm_map(corpus,FUN = stripWhitespace)
+# stem the corpurs
+corpus = tm_map(corpus,FUN = stemDocument)
+# convert corpus to document term matrix to get a list of unique words contained in all reviews
+dtm_hk <- DocumentTermMatrix(corpus)
+# select words unrelated to shopping to be removed
+words_remove <- setdiff(colnames(dtm_hk), shopping_words)
+length(words_remove)
+# remove words unrelated to shopping
+corpus = tm_map(corpus, FUN = removeWords, words_remove[1:4000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[4001:7000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[7001:10000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[10001:13000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[13001:16000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[16001:17987])
+corpus = tm_map(corpus, FUN = removeNumbers)
+```
+
+Transform cleaned corpus to document term matrix
+```{r}
+dtm_hk_then <- DocumentTermMatrix(corpus)
+colnames(dtm_hk_then)
+```
+
+
+Make data frame
+```{r}
+dtm_hk_then = as.data.frame(as.matrix(dtm_hk_then))
+sort(colSums(dtm_hk_then),decreasing = T)
+
+```
+
+Add information summarizing columns:
+```{r}
+# add a column counting the number of shopping related words in a review
+dtm_hk_then['shopping_word_count'] = rowSums(dtm_hk_then)
+# add a column specifying if a review contains shopping related words
+dtm_hk_then['if_shopping_word'] = ifelse(dtm_hk_then$shopping_word_count >= 1, 1, 0)
+```
+
+Attach word frequency to original data frame and select columns
+```{r}
+hongkong <- hongkong %>%
+  cbind(dtm_hk_then) %>%
+  select(-Review_ID, -Reviewer_Location, 
+         -Review_Text, -Year_Month, 
+         -Year, -Month, -continent)
+hongkong['no_shopping_word'] = ifelse(rowSums(hongkong[4:19]) == 0, 1, 0)
+hongkong <- hongkong %>%
+  select_if(function(x) !all(x == 0))
+```
+
+Calculate average ratings for each shopping words and add counts
+```{r}
+shopping_hk = data.frame(rd=names(colSums(hongkong[c(4:22)])))
+df <- data.frame()
+for (i in 1:nrow(shopping_hk)) { 
+  for (k in shopping_hk[i,]) { 
+    avg_rating <- hongkong %>%
+      filter(hongkong[,k] != 0) %>%
+      summarise(avg_rating = mean(Rating))
+    df <- rbind(df, avg_rating)
+  } 
+}
+shopping_mention_count <- data.frame(rides = names(colSums(hongkong[c(4:22)])), 
+                                 counts = as.numeric(colSums(hongkong[c(4:22)])),
+                                 avg_raing = df)
+shopping_mention_count
+```
+
+Get frequency of each shopping word in total branch reviews & in reviews that mentioned shopping in the branch
+```{r}
+freq_all <- shopping_mention_count %>%
+  mutate(freq_branch_pct = counts/nrow(hongkong)*100, 
+         freq_Mention_pct = counts/counts[17]*100) %>%
+  mutate_at(c(3:5), round, digits = 2)%>%
+  arrange(desc(freq_Mention_pct))
+freq_all
+```
+
+
+#### Rating analysis
+
+
+Proportions of reviews that mentioned shopping words & no mention rides in the branch
+```{r}
+p_mention_orno <- freq_all[c(1,3), 1:4]
+p_mention_orno%>%
+  ggplot(aes(x="", y=freq_branch_pct, fill=rides)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  labs(fill = "Shopping Words Mentioned") +
+  ggtitle("Reviews that mentioned & did not mention shopping words in Hong Kong Branch") +
+  theme_void()+
+  geom_text(aes(label = paste0(freq_branch_pct, "%")), position = position_stack(vjust=0.5)) +
+  scale_fill_manual(values=c("#F1786C", "#E8CCC7"), 
+                    labels=c("Mentioned", "Did not mention"))
+```
+
+
+
+
+Proportions of shopping words mentioned in the branch over total number of reviews in the branch & over reviews that mentioned rides in branch
+```{r}
+p_shops <- freq_all[4:19, 1:5]
+
+# filter freqs >= 2% of the reviews that mentioned rides in the branch, rating high to low
+hot_shops <- p_shops %>%
+  filter(freq_Mention_pct >= 2) 
+
+shopping_rank_plot <- hot_shops%>%
+  ggplot(aes(x=reorder(rides,freq_Mention_pct), 
+             y=freq_Mention_pct, fill=freq_Mention_pct))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  labs(x = "", y = "Frequency in %") +
+  ggtitle("All shopping words mentioned in Hong Kong with % distribution")+
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE) +
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.x  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.title = element_text(size = 15, hjust = -0.267, vjust = 1))
+
+rating_rank_plot <- hot_shops %>%
+  ggplot() +
+  geom_col(aes(x=reorder(rides, -avg_rating), y=freq_Mention_pct, fill=freq_Mention_pct), 
+           width=0.7, position='dodge')+  
+  scale_y_continuous(name = "Frequency in %", 
+                     expand = c(0,0),
+                     limits = c(-10, 80)) +
+  geom_text(aes(x=rides, y=-5, label=avg_rating), size = 4.5) +
+  labs(x = "Mostly mentioned shopping words", y = "Frequency in %") +
+  ggtitle("Average rating ranked with most popular shopping words & no shopping words") +
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE)+
+  labs(tag ="Ratings:")+  
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.y  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.tag.position = c(0.01,0.115),
+        plot.tag = element_text(hjust = 0, size=12.5),
+        plot.title = element_text(size = 15))
+
+#grid.arrange(shopping_rank_plot, rating_rank_plot, ncol = 2)
+shopping_rank_plot
+rating_rank_plot
+```
+
+From the two graphs above, we can see that words including "shop", "toy", "book" and "souvenir" are mentioned most frequently in reviews of the Hong Kong brancn, indicating the most cared aspects of shopping. Products like book, cloth and toy received higher ratings while cart, bag hat received lower ratings also implies customer satisfaction. 
+
+### California
+
+Cleaning texts:
+```{r message=FALSE, warning=FALSE}
+corpus <- corpus_cali
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+corpus = tm_map(corpus,FUN = removePunctuation)
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+corpus = tm_map(corpus,FUN = stripWhitespace)
+corpus = tm_map(corpus,FUN = stemDocument)
+dtm_cali <- DocumentTermMatrix(corpus)
+words_remove <- setdiff(colnames(dtm_cali), shopping_words)
+length(words_remove)
+
+corpus = tm_map(corpus, FUN = removeWords, words_remove[1:4000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[4001:7000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[7001:10000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[10001:13000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[13001:16000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[16001:19000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[19001:21000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[21001:24000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[24001:25632])
+corpus = tm_map(corpus, FUN = removeNumbers)
+```
+
+
+
+Transform cleaned corpus to document term matrix
+```{r}
+dtm_cali_then <- DocumentTermMatrix(corpus)
+colnames(dtm_cali_then)
+```
+
+
+Make data frame
+```{r}
+dtm_cali_then = as.data.frame(as.matrix(dtm_cali_then))
+sort(colSums(dtm_cali_then),decreasing = T)
+```
+Add information summarizing columns:
+```{r}
+# add a column counting the number of shopping related words in a review
+dtm_cali_then['shopping_word_count'] = rowSums(dtm_cali_then)
+# add a column specifying if a review contains shopping related words
+dtm_cali_then['if_shopping_word'] = ifelse(dtm_cali_then$shopping_word_count >= 1, 1, 0)
+```
+
+Attach word frequency to original data frame and select columns
+```{r}
+cali <- cali %>%
+  cbind(dtm_cali_then) %>%
+  select(-Review_ID, -Reviewer_Location, 
+         -Review_Text, -Year_Month, 
+         -Year, -Month, -continent)
+cali['no_shopping_word'] = ifelse(rowSums(cali[4:19]) == 0, 1, 0)
+cali <- cali %>%
+  select_if(function(x) !all(x == 0))
+```
+
+
+Calculate average ratings for each shopping words and add counts
+```{r}
+shopping_ca = data.frame(rd=names(colSums(cali[c(4:22)])))
+# average rating for each shopping word
+df <- data.frame()
+for (i in 1:nrow(shopping_ca)) { 
+  for (k in shopping_ca[i,]) { 
+    avg_rating <- cali %>%
+      filter(cali[,k] != 0) %>%
+      summarise(avg_rating = mean(Rating))
+    df <- rbind(df, avg_rating)
+  } 
+}
+# shopping words, counts, and average ratings
+shopping_mention_count <- data.frame(rides = names(colSums(cali[c(4:22)])), 
+                                     counts = as.numeric(colSums(cali[c(4:22)])),
+                                     avg_raing = df)
+shopping_mention_count
+```
+Get frequency of each shopping word in total branch reviews & in reviews that mentioned shopping in the branch
+```{r}
+freq_all <- shopping_mention_count %>%
+  mutate(freq_branch_pct = counts/nrow(cali)*100, 
+         freq_Mention_pct = counts/counts[17]*100) %>%
+  mutate_at(c(3:5), round, digits = 2)%>%
+  arrange(desc(freq_Mention_pct)) 
+freq_all
+```
+
+#### Rating Analysis
+```{r}
+p_mention_orno <- freq_all[c(1,3), 1:4]
+p_mention_orno%>%
+  ggplot(aes(x="", y=freq_branch_pct, fill=rides)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  labs(fill = "Shopping Words Mentioned") +
+  ggtitle("Reviews that mentioned & did not mention shopping words in California Branch") +
+  theme_void()+
+  geom_text(aes(label = paste0(freq_branch_pct, "%")), position = position_stack(vjust=0.5)) +
+  scale_fill_manual(values=c("#F1786C", "#E8CCC7"), 
+                    labels=c("Mentioned", "Did not mention"))
+```
+
+Proportions of shopping words mentioned in the branch over total number of reviews in the branch & over reviews that mentioned rides in branch
+```{r}
+p_shops <- freq_all[4:19, 1:5]
+
+# filter freqs >= 2% of the reviews that mentioned rides in the branch, rating high to low
+hot_shops <- p_shops %>%
+  filter(freq_Mention_pct >= 2) 
+
+shopping_rank_plot <- hot_shops%>%
+  ggplot(aes(x=reorder(rides,freq_Mention_pct), 
+             y=freq_Mention_pct, fill=freq_Mention_pct))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  labs(x = "", y = "Frequency in %") +
+  ggtitle("All shopping words mentioned in California with % distribution")+
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE) +
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.x  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.title = element_text(size = 15, hjust = -0.267, vjust = 1))
+
+rating_rank_plot <- hot_shops %>%
+  ggplot() +
+  geom_col(aes(x=reorder(rides, -avg_rating), y=freq_Mention_pct, fill=freq_Mention_pct), 
+           width=0.7, position='dodge')+  
+  scale_y_continuous(name = "Frequency in %", 
+                     expand = c(0,0),
+                     limits = c(-10, 80)) +
+  geom_text(aes(x=rides, y=-5, label=avg_rating), size = 4.5) +
+  labs(x = "Mostly mentioned shopping words", y = "Frequency in %") +
+  ggtitle("Average rating ranked with most popular shopping words & no shopping words") +
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE)+
+  labs(tag ="Ratings:")+  
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.y  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.tag.position = c(0.01,0.115),
+        plot.tag = element_text(hjust = 0, size=12.5),
+        plot.title = element_text(size = 15))
+
+#grid.arrange(shopping_rank_plot, rating_rank_plot, ncol = 2)
+shopping_rank_plot
+rating_rank_plot
+
+```
+
+From the two graph above, we can observe that "shop", "book", "bag" and "souvenir" are mentioned most frequently. Art, hat, gift and band receive higher ratings on average, but more frequently mentioned products and words received relatively lower rating. 
+
+### Paris
+Cleaning texts:
+```{r message=FALSE, warning=FALSE}
+corpus <- corpus_paris
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+corpus = tm_map(corpus,FUN = removePunctuation)
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+corpus = tm_map(corpus,FUN = stripWhitespace)
+#dict = findFreqTerms(DocumentTermMatrix(Corpus(VectorSource(disneyland$Review_Text))),
+#                     lowfreq = 0)
+#dict_corpus = Corpus(VectorSource(dict))
+corpus = tm_map(corpus,FUN = stemDocument)
+dtm_hk <- DocumentTermMatrix(corpus)
+words_remove <- setdiff(colnames(dtm_hk), shopping_words)
+length(words_remove)
+
+corpus = tm_map(corpus, FUN = removeWords, words_remove[1:4000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[4001:7000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[7001:10000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[10001:13000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[13001:16000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[16001:19000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[19001:21000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[21001:24000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[24001:27000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[27001:30000])
+corpus = tm_map(corpus, FUN = removeWords, words_remove[30001:32589])
+corpus = tm_map(corpus, FUN = removeNumbers)
+```
+
+
+Transform cleaned corpus to document term matrix
+```{r}
+dtm_paris_then <- DocumentTermMatrix(corpus)
+colnames(dtm_paris_then)
+```
+
+Make data frame
+```{r}
+dtm_paris_then = as.data.frame(as.matrix(dtm_paris_then))
+sort(colSums(dtm_paris_then),decreasing = T)
+```
+Add information summarizing columns:
+```{r}
+# add a column counting the number of shopping related words in a review
+dtm_paris_then['shopping_word_count'] = rowSums(dtm_paris_then)
+# add a column specifying if a review contains shopping related words
+dtm_paris_then['if_shopping_word'] = ifelse(dtm_paris_then$shopping_word_count >= 1, 1, 0)
+```
+
+Attach word frequency to original data frame and select columns
+```{r}
+paris <- paris %>%
+  cbind(dtm_paris_then) %>%
+  select(-Review_ID, -Reviewer_Location, 
+         -Review_Text, -Year_Month, 
+         -Year, -Month, -continent)
+paris['no_shopping_word'] = ifelse(rowSums(paris[4:19]) == 0, 1, 0)
+paris <- paris %>%
+  select_if(function(x) !all(x == 0))
+```
+
+Calculate average ratings for each shopping words and add counts
+```{r}
+shopping_paris = data.frame(rd=names(colSums(paris[c(4:22)])))
+# average rating for each shopping word
+df <- data.frame()
+for (i in 1:nrow(shopping_paris)) { 
+  for (k in shopping_paris[i,]) { 
+    avg_rating <- paris %>%
+      filter(paris[,k] != 0) %>%
+      summarise(avg_rating = mean(Rating))
+    df <- rbind(df, avg_rating)
+  } 
+}
+# shopping words, counts, and average ratings
+shopping_mention_count <- data.frame(rides = names(colSums(paris[c(4:22)])), 
+                                     counts = as.numeric(colSums(paris[c(4:22)])),
+                                     avg_raing = df)
+shopping_mention_count
+```
+
+Get frequency of each shopping word in total branch reviews & in reviews that mentioned shopping in the branch
+```{r}
+freq_all <- shopping_mention_count %>%
+  mutate(freq_branch_pct = counts/nrow(paris)*100, 
+         freq_Mention_pct = counts/counts[17]*100) %>%
+  mutate_at(c(3:5), round, digits = 2)%>%
+  arrange(desc(freq_Mention_pct)) 
+freq_all
+```
+
+#### Rating Analysis
+```{r}
+p_mention_orno <- freq_all[c(1,3), 1:4]
+p_mention_orno%>%
+  ggplot(aes(x="", y=freq_branch_pct, fill=rides)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) +
+  labs(fill = "Shopping Words Mentioned") +
+  ggtitle("Reviews that mentioned & did not mention shopping words in Paris Branch") +
+  theme_void()+
+  geom_text(aes(label = paste0(freq_branch_pct, "%")), position = position_stack(vjust=0.5)) +
+  scale_fill_manual(values=c("#F1786C", "#E8CCC7"), 
+                    labels=c("Mentioned", "Did not mention"))
+```
+
+Proportions of shopping words mentioned in the branch over total number of reviews in the branch & over reviews that mentioned rides in branch
+```{r}
+p_shops <- freq_all[4:19, 1:5]
+
+# filter freqs >= 2% of the reviews that mentioned rides in the branch, rating high to low
+hot_shops <- p_shops %>%
+  filter(freq_Mention_pct >= 2) 
+
+shopping_rank_plot <- hot_shops%>%
+  ggplot(aes(x=reorder(rides,freq_Mention_pct), 
+             y=freq_Mention_pct, fill=freq_Mention_pct))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  labs(x = "", y = "Frequency in %") +
+  ggtitle("All shopping words mentioned in Paris with % distribution")+
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE) +
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.x  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.title = element_text(size = 15, hjust = -0.267, vjust = 1))
+
+rating_rank_plot <- hot_shops %>%
+  ggplot() +
+  geom_col(aes(x=reorder(rides, -avg_rating), y=freq_Mention_pct, fill=freq_Mention_pct), 
+           width=0.7, position='dodge')+  
+  scale_y_continuous(name = "Frequency in %", 
+                     expand = c(0,0),
+                     limits = c(-10, 80)) +
+  geom_text(aes(x=rides, y=-5, label=avg_rating), size = 4.5) +
+  labs(x = "Mostly mentioned shopping words", y = "Frequency in %") +
+  ggtitle("Average rating ranked with most popular shopping words & no shopping words") +
+  scale_fill_gradient(low = "#FCDADA", high = "#C50F0F", guide = FALSE)+
+  labs(tag ="Ratings:")+  
+  theme(plot.background = element_blank(), 
+        panel.background = element_blank(), 
+        panel.grid.major.y  = element_line(color = "light grey"),
+        axis.line = element_line(color = "black"),
+        plot.tag.position = c(0.01,0.115),
+        plot.tag = element_text(hjust = 0, size=12.5),
+        plot.title = element_text(size = 15))
+
+# grid.arrange(shopping_rank_plot, rating_rank_plot, ncol = 2)
+shopping_rank_plot
+rating_rank_plot
+```
+
+From the visualizations, "book" and "shop" are the leading words mentioned in the reviews, with "bag" and "toy" followed. Generally these shopping-related words received lower rating in Paris branch compared to the other two with souvenir and gift most favored by reviewers. 
+
+## Sentiment Analysis
+
+### Hong Kong
+```{r}
+afinn = get_sentiments('afinn')
+```
+Integrate the three branches and attach to original dataset
+```{r}
+# rbind all 3 branches 
+tri_branch <- rbind(hongkong, cali, paris)
+# cbind indicators to original dataset
+disneyland <- cbind(disneyland, tri_branch[, 21])
+colnames(disneyland)[11] <- 'if_shopping_words'
+```
+
+Distribution of sentiment scores with shopping words
+```{r message=FALSE, warning=FALSE}
+dis_w_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in Hongkong Branch (with shopping words)")
+dis_w_shop
+
+```
+
+
+Distribution of sentiment scores without shopping words
+```{r message=FALSE, warning=FALSE}
+dis_wt_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in Hongkong Branch (without shopping words)")
+dis_wt_shop
+
+```
+
+
+### California
+
+Distribution of sentiment scores with shopping words
+```{r message=FALSE, warning=FALSE}
+dis_w_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in California Branch (with shopping words)")
+dis_w_shop
+```
+
+
+Distribution of sentiment scores without shopping words
+```{r message=FALSE, warning=FALSE}
+dis_wt_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in California Branch (without shopping words)")
+dis_wt_shop
+```
+
+
+### Paris
+Distribution of sentiment scores with shopping words
+```{r message=FALSE, warning=FALSE}
+dis_w_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in Paris Branch (with shopping words)")
+dis_w_shop
+
+```
+
+Distribution of sentiment scores without shopping words
+```{r message=FALSE, warning=FALSE}
+dis_wt_shop <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  theme_bw() +
+  labs(x = "Review Sentiment Scores", y = "Number of Reviews") +
+  ggtitle("Distribution of Review Sentiment in Paris Branch (without shopping words)")
+dis_wt_shop
+
+```
+
+
+## Overall Sentiment Analytis
+Calculate proportions and average scores required
+```{r message=FALSE, warning=FALSE}
+##### hong kong#####
+# proportion of positive sentiment with shopping words
+pos_prop_w_shop_hk <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+#  proportion of positive sentiment without shopping words
+pos_prop_wt_shop_hk <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+# average sentiment score with shopping words
+mean_w_shop_hk <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+
+# average sentiment score without shopping words
+mean_wt_shop_hk <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+
+
+##### california #####
+# proportion of positive sentiment with shopping words
+pos_prop_w_shop_ca <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+#  proportion of positive sentiment without shopping words
+pos_prop_wt_shop_ca <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+# average sentiment score with shopping words
+mean_w_shop_ca <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+
+# average sentiment score without shopping words
+mean_wt_shop_ca <- disneyland %>%
+  filter(Branch == 'Disneyland_California', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+
+
+
+##### paris #####
+# proportion of positive sentiment with shopping words
+pos_prop_w_shop_paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+#  proportion of positive sentiment without shopping words
+pos_prop_wt_shop_paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  mutate(positive = ifelse(value >= 0, 1, 0)) %>%
+  summarize(proportion_positive = sum(positive) / n())
+
+# average sentiment score with shopping words
+mean_w_shop_paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 1) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+
+# average sentiment score without shopping words
+mean_wt_shop_paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris', if_shopping_words == 0) %>%
+  select(Review_ID,Review_Text)%>%
+  group_by(Review_ID)%>%
+  unnest_tokens(output=word,input=Review_Text)%>%
+  inner_join(afinn) %>%
+  ungroup() %>%
+  summarize(avg = mean(value))
+```
+
+Proportion of positive words in reviews w/wt shopping words
+```{r message=FALSE, warning=FALSE}
+# make proportion plot
+df_prop = data.frame(branch = c('Hong Kong', 'California', 'Paris'),
+                     prop_pos_words_w_shop = c(as.numeric(pos_prop_w_shop_hk), as.numeric(pos_prop_w_shop_ca), as.numeric(pos_prop_w_shop_paris)),
+                     prop_pos_words_wt_shop = c(as.numeric(pos_prop_wt_shop_hk), as.numeric(pos_prop_wt_shop_ca), as.numeric(pos_prop_wt_shop_paris)))
+df_prop_long <- tidyr::pivot_longer(df_prop, cols = c("prop_pos_words_w_shop", "prop_pos_words_wt_shop"), names_to = "category", values_to = "proportion")
+ggplot(df_prop_long, aes(x = branch, y = proportion, fill = category)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black", size = 0.5) +
+  scale_fill_manual(values = c("#0072B2", "#F0E442"), 
+                    labels=c("Mentioned", "Did not mention")) +
+  labs(title = "Proportion of Positive Words with and without Shopping words", x = "Branch", y = "Proportion", fill = 'Shopping words mentioned') +
+  geom_text(aes(label=round(proportion, 2)), position=position_dodge(width=0.9), vjust=-0.25) +
+theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 14, face = "bold"),
+        legend.title = element_text(size = 12, face = "bold"),
+        legend.text = element_text(size = 12))
+```
+
+Average sentiment scores of reviews w/wt shopping words
+```{r message=FALSE, warning=FALSE}
+# make average score plot
+df_mean = data.frame(branch = c('Hong Kong', 'California', 'Paris'),
+                     mean_w_shop = c(as.numeric(mean_w_shop_hk), as.numeric(mean_w_shop_ca), as.numeric(mean_w_shop_paris)),
+                     mean_wt_shop = c(as.numeric(mean_wt_shop_hk), as.numeric(mean_wt_shop_ca), as.numeric(mean_wt_shop_paris)))
+df_mean_long <- tidyr::pivot_longer(df_mean, cols = c("mean_w_shop", "mean_wt_shop"), names_to = "category", values_to = "proportion")
+ggplot(df_mean_long, aes(x = branch, y = proportion, fill = category)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7, color = "black", size = 0.5) +
+  scale_fill_manual(values = c("#0072B2", "#F0E442"), 
+                    labels=c("Mentioned", "Did not mention")) +
+  labs(title = "Average sentiment scores with and without Shopping words", x = "Branch", y = "Average sentiment score", fill = 'Shopping words mentioned') +
+  geom_text(aes(label=round(proportion, 2)), position=position_dodge(width=0.9), vjust=-0.25) +
+theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 14, face = "bold"),
+        legend.title = element_text(size = 12, face = "bold"),
+        legend.text = element_text(size = 12))
+```
+
+From the proportion and average sentiment score graphs presented above, we observe that among all 3 branches, more positive words are in reviews unrelated to shopping experience, and reviews unrelated to shopping experience tend to have more positive tone than reviews that talked about shopping. We can thus conclude that it might be a common problem that Disneyland as a whole has to do better in improving travelers' shopping experience.
+
+
+
+
+
+
+
+
+
+
+
+
+

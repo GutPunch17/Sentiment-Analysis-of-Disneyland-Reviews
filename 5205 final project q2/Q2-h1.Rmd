@@ -1,0 +1,378 @@
+---
+title: "5205 final prj Q2 h1"
+author: "ZiYan Cui"
+date: "4/17/2023"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, message = F, results = "hide", warning=FALSE}
+library(tidyverse)
+library(tm)
+library(tidytext)
+library(dplyr)
+library(wordcloud)
+library(tidyr); library(ggplot2); library(ggthemes)
+
+disneyland<- read.csv(file = "disneyland.csv", stringsAsFactors = F)
+```
+
+# Research Question 2       
+
+
+## Hypothesis 1:   
+H0: Reviews from different Disney branches tend to focus on similar topics.  
+Ha: Reviews from different Disney branches focus on different topics.  
+```{r, warning=FALSE}
+# split dataset based on branch
+hongkong <- disneyland %>%
+  filter(Branch == 'Disneyland_HongKong')
+cali <- disneyland %>%
+  filter(Branch == 'Disneyland_California')
+paris <- disneyland %>%
+  filter(Branch == 'Disneyland_Paris')
+```       
+Splited the three branches based on location and examine the reviews in the following.
+
+
+### Hong Kong       
+```{r, warning=FALSE}
+hongkong$Review_Text <- gsub('Hong Kong','HongKong', hongkong$Review_Text)
+
+# create corpus
+corpus = Corpus(VectorSource(hongkong$Review_Text))
+corpus[[1]][1]
+
+# clean text
+# convert to lower case
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+
+# remove urls
+corpus = tm_map(corpus,
+                FUN = content_transformer(FUN = function(x)gsub(pattern = 'http[[:alnum:][:punct:]]*',
+                                                                replacement = ' ',x = x)))
+
+# remove punctuations
+corpus = tm_map(corpus,FUN = removePunctuation)
+corpus[[1]][1]
+
+# remove stopwords
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+corpus[[1]][1]
+
+# strip white spaces
+corpus = tm_map(corpus,FUN = stripWhitespace)
+corpus[[1]][1]
+
+# create dictionary
+dict = findFreqTerms(DocumentTermMatrix(Corpus(VectorSource(disneyland$Review_Text))),
+                     lowfreq = 0)
+dict_corpus = Corpus(VectorSource(dict))
+
+# stem document
+corpus = tm_map(corpus,FUN = stemDocument)
+
+# create document term matrix
+dtm = DocumentTermMatrix(corpus)
+
+# remove sparse terms
+xdtm = removeSparseTerms(dtm,sparse = 0.97)
+xdtm
+dim(xdtm)
+
+# make dataframe and complete stems
+xdtm = as.data.frame(as.matrix(xdtm))
+colnames(xdtm) = stemCompletion(x = colnames(xdtm),
+                                dictionary = dict_corpus,
+                                type='prevalent')
+colnames(xdtm) = make.names(colnames(xdtm))
+word_freq_hk <- data.frame(word = colnames(xdtm), freq = colSums(xdtm))
+
+
+# word cloud
+# set.seed(617)
+# wordcloud(words = word_freq_hk$word,word_freq_hk$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+
+
+word_total_hk = sum(word_freq_hk$freq)
+hk_30 <- word_freq_hk %>%
+  mutate(percentage = freq/word_total_hk*100) %>%
+  arrange(desc(percentage)) %>%
+  head(30)
+
+# top 30 frequent words in Hong Kong
+hk_30
+
+
+#hk_30%>%
+#  ggplot(aes(x=reorder(word,percentage), y=percentage, fill=percentage))+
+#  geom_col(position='dodge')+
+#  coord_flip()+
+#  scale_fill_gradient2(low ="#FFEDF0", high = "#C84747",space ="Lab", guide = FALSE) + 
+#  theme_economist()+
+#  theme(plot.background = element_blank()) 
+```       
+The above result shows the top 30 frequent words in Hong Kong branch. There are words that are very common in this scenario but do not convey useful information, like 'disneyland', 'disney', 'one', and verbs like 'get', 'can', 'will', etc. Therefore, by manually filtering words that might convey more meaningful information, we would be able to know what topics do the reviewer care about when they visit to each branch. 
+
+
+#### Selected top 10 topics in Hong Kong       
+
+```{r, warning=FALSE, fig.width=12, fig.height=6}
+hk_topwords <- subset(hk_30, rownames(hk_30) %in% c("ride", "park", "kid", "show", 'hongkong',
+                                                    "food", "parad", "queue", "firework", "wait")) # 10 word
+hk_topwords%>%
+  ggplot(aes(x=reorder(word,percentage), y=percentage, fill=percentage))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  scale_fill_gradient2(low ="#FFEDF0", high = "#C84747",space ="Lab", guide = FALSE) + 
+  theme_economist()+
+  theme(plot.background = element_blank()) +
+  labs(x = "Words", y = "Frequency in %") +
+  ggtitle("Top 10 frequent topics in Hong Kong with % distribution")
+```           
+  
+Above are the selected top 10 topics with frequency percentages for Hong Kong branch. We noticed that a considerable proportion of reviewers care about ride, the park itself, care about kid, the shows, etc. Looks like people tend to be excited about the Hong Kong branch itself. Following by food, parade, the queue and wait, as well as the firework. Looks like the top topics generally cover most of the facilities that are included in a typical Disneyland park.           
+Next, we would use the same process to first generate top 30 frequent words for California branch and Paris branch, and then manually select meaningful topics that can provide insights.
+
+
+### California        
+
+```{r, results = "hide", warning=FALSE}
+# create corpus
+corpus = Corpus(VectorSource(cali$Review_Text))
+corpus[[1]][1]
+
+# clean text
+# convert to lower case
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+
+# remove urls
+corpus = tm_map(corpus,
+                FUN = content_transformer(FUN = function(x)gsub(pattern = 'http[[:alnum:][:punct:]]*',
+                                                                replacement = ' ',x = x)))
+
+# remove punctuations
+corpus = tm_map(corpus,FUN = removePunctuation)
+corpus[[1]][1]
+
+# remove stopwords
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+corpus[[1]][1]
+
+# strip white spaces
+corpus = tm_map(corpus,FUN = stripWhitespace)
+corpus[[1]][1]
+
+# create dictionary
+dict = findFreqTerms(DocumentTermMatrix(Corpus(VectorSource(disneyland$Review_Text))),
+                     lowfreq = 0)
+dict_corpus = Corpus(VectorSource(dict))
+
+# stem document
+corpus = tm_map(corpus,FUN = stemDocument)
+
+# create document term matrix
+dtm = DocumentTermMatrix(corpus)
+
+# remove sparse terms
+xdtm = removeSparseTerms(dtm,sparse = 0.97)
+xdtm
+dim(xdtm)
+
+# make dataframe and complete stems
+xdtm = as.data.frame(as.matrix(xdtm))
+colnames(xdtm) = stemCompletion(x = colnames(xdtm),
+                                dictionary = dict_corpus,
+                                type='prevalent')
+colnames(xdtm) = make.names(colnames(xdtm))
+word_freq_cali <- data.frame(word = colnames(xdtm), freq = colSums(xdtm))
+
+# word cloud
+# set.seed(617)
+# wordcloud(words = word_freq_cali$word,word_freq_cali$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+word_total_ca = sum(word_freq_cali$freq)
+ca_30 <- word_freq_cali %>%
+  mutate(percentage = freq/word_total_ca*100) %>%
+  arrange(desc(percentage)) %>%
+  head(30)
+```
+
+```{r, warning=FALSE, fig.width=12, fig.height=6}
+# top 30 frequent topics in California
+ca_30
+
+#ca_30%>%
+#  ggplot(aes(x=reorder(word, percentage), y=percentage, fill=percentage))+
+#  geom_col(position='dodge')+
+#  coord_flip()+
+#  scale_fill_gradient2(low ="#D6F1DF", high = "#00A632",space ="Lab", guide = FALSE) + 
+#  theme_economist()+
+#  theme(plot.background = element_blank()) 
+```
+
+#### Selected top 10 topics in California       
+
+```{r, warning=FALSE}
+ca_topwords <- subset(ca_30, rownames(ca_30) %in% c("park", "ride", "line", "pass", "wait",
+                                                    "kid", "crowd", "fast", "peopl", "back")) # 10 words
+ca_topwords %>%
+  ggplot(aes(x=reorder(word, percentage), y=percentage, fill=percentage))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  scale_fill_gradient2(low ="#D6F1DF", high = "#00A632",space ="Lab", guide = FALSE) + 
+  theme_economist()+
+  theme(plot.background = element_blank()) +
+  labs(x = "Words", y = "Frequency in %") +
+  ggtitle("Top 10 frequent topics in California with % distribution")
+
+```               
+
+Above is the top 10 most frequent topics in California branch. Comparing to the Hong Kong branch, we could easily see that words like 'line', 'pass', 'crowd', 'fast', and 'people' occured on the list. This might suggest that people have more to say about their queue experiences, waiting time, about the visiting crowd or visitor amount, and probably the speed and efficiency taking rides during their visits.         
+
+
+### Paris          
+
+```{r, results = "hide", warning=FALSE}
+# create corpus
+corpus = Corpus(VectorSource(paris$Review_Text))
+corpus[[1]][1]
+
+# clean text
+# convert to lower case
+corpus = tm_map(corpus,FUN = content_transformer(tolower))
+
+# remove urls
+corpus = tm_map(corpus,
+                FUN = content_transformer(FUN = function(x)gsub(pattern = 'http[[:alnum:][:punct:]]*',
+                                                                replacement = ' ',x = x)))
+
+# remove punctuations
+corpus = tm_map(corpus,FUN = removePunctuation)
+corpus[[1]][1]
+
+# remove stopwords
+corpus = tm_map(corpus,FUN = removeWords,c(stopwords('english')))
+corpus[[1]][1]
+
+# strip white spaces
+corpus = tm_map(corpus,FUN = stripWhitespace)
+corpus[[1]][1]
+
+# create dictionary
+dict = findFreqTerms(DocumentTermMatrix(Corpus(VectorSource(paris$Review_Text))),
+                     lowfreq = 0)
+dict_corpus = Corpus(VectorSource(dict))
+
+# stem document
+corpus = tm_map(corpus,FUN = stemDocument)
+
+# create document term matrix
+dtm = DocumentTermMatrix(corpus)
+
+# remove sparse terms
+xdtm = removeSparseTerms(dtm,sparse = 0.97)
+xdtm
+dim(xdtm)
+
+# make dataframe and complete stems
+xdtm = as.data.frame(as.matrix(xdtm))
+colnames(xdtm) = stemCompletion(x = colnames(xdtm),
+                                dictionary = dict_corpus,
+                                type='prevalent')
+colnames(xdtm) = make.names(colnames(xdtm))
+word_freq_paris <- data.frame(word = colnames(xdtm), freq = colSums(xdtm))
+
+# wordcloud
+#set.seed(617)
+#wordcloud(words = word_freq_paris$word,word_freq_paris$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+word_total_pr = sum(word_freq_paris$freq)
+pr_30 <- word_freq_paris %>%
+  mutate(percentage = freq/word_total_ca*100) %>%
+  arrange(desc(percentage)) %>%
+  head(30)
+```
+
+```{r, warning=FALSE}
+# top 30 frequent topics in Paris
+pr_30
+
+#pr_30%>%
+#  ggplot(aes(x=reorder(word, percentage), y=percentage, fill=percentage))+
+#  geom_col(position='dodge')+
+#  coord_flip()+
+#  scale_fill_gradient2(low ="#D4DFFF", high = "#4169E2",space ="Lab", guide = FALSE) + 
+#  theme_economist()+
+#  theme(plot.background = element_blank())
+```
+
+#### Selected top 10 topics in Paris       
+
+```{r, warning=FALSE, fig.width=12, fig.height=6}
+pr_topwords <- subset(pr_30, rownames(pr_30) %in% c(1, 2, 8, 13, 14, 
+                                                    15, 18, 21, 27, 28)) # 10 words
+pr_topwords %>%
+  ggplot(aes(x=reorder(word, percentage), y=percentage, fill=percentage))+
+  geom_col(position='dodge')+
+  coord_flip()+
+  scale_fill_gradient2(low ="#D4DFFF", high = "#4169E2",space ="Lab", guide = FALSE) + 
+  theme_economist()+
+  theme(plot.background = element_blank()) +
+  labs(x = "Words", y = "Frequency in %") +
+  ggtitle("Top 10 frequent topics in Paris with % distribution")
+
+
+
+```               
+
+Above is the top 10 most frequent topics in Paris branch. Comparing to the previous two branches, reviewers also mentioned a lot about 'queue', 'food', 'wait', 'show', 'parade', and 'kid'. However, what's worth noticing is that they also mentioned a lot about 'pariah' and 'character', which are new to the other two branches.           
+
+
+```{r}
+head(paris[grep("pariah", paris$Review_Text, ignore.case = TRUE), "Review_Text"], 2)
+head(paris[grep("character", paris$Review_Text, ignore.case = TRUE), "Review_Text"], 2)
+```               
+Taking closer look at the reviews, we noticed that the reviewer who mentioned 'pariah' mostly talked about how they were treated like 'pariah' in some cases, some suggested otherwise. This might suggest that the customer services might be considered as polarized. For the 'character' word, this might suggest that visitors who went to Paris branch pay considerable attention to meeting with the characters in the park.        
+
+
+
+### Same frequent topics in all three branches
+
+```{r, warning=FALSE, fig.width=12, fig.height=6}
+hk_sub <- filter(hk_topwords, 
+                 word %in% c('park', 'ride', 'wait', 'kid'))%>% mutate(branch = 'hk')
+
+ca_sub <- filter(ca_topwords, 
+                 word %in% c('park', 'ride', 'wait', 'kid'))%>% mutate(branch = 'ca')
+
+pr_sub <- filter(pr_topwords, 
+                 word %in% c('park', 'ride', 'wait', 'kid'))%>% mutate(branch = 'pr')
+
+same_topwords = rbind(hk_sub, ca_sub, pr_sub)
+same_topwords <- same_topwords %>%
+  select(word, percentage, branch)
+
+ggplot(same_topwords, aes(x = word, y = percentage, fill = branch)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~ branch, ncol = 3) +
+  labs(x = "Words", y = "Percentages in %", fill = "Branch") +
+  theme(plot.background = element_blank(),
+        #text=element_text(size=16),
+        strip.text=element_text(size=14),
+        axis.text.x=element_text(size=14, angle=45, hjust=1),
+        axis.text.y=element_text(size=14),
+        legend.position = "none") +
+  scale_fill_manual(values = c("hk" = "#EE4242", "ca" = "#28E92C", "pr" = "#4169E2", guide = FALSE)) +
+  ggtitle("Same frequent words/topics in all three branches")
+
+```               
+          
+          
+These words, 'kid', 'park', 'ride', and 'wait' are topics that are mentioned for all three branches. These might suggest that reviewers care about these topics regardless of the branch locations.         
+
+
+
+
